@@ -1,0 +1,21 @@
+{
+  "name": "hyperliquid-whale-bot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node whaleTracker.js",
+    "tweet": "node tweet.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "dotenv": "^16.5.0",
+    "node-fetch": "^3.3.2",
+    "twitter-api-v2": "^1.23.2",
+    "ws": "^8.16.0"
+  }
+}

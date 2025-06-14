@@ -9,7 +9,7 @@ const HYPERLIQUID_API_URL = 'https://api.hyperliquid.xyz';
 const HYPERLIQUID_WS_URL = 'wss://api.hyperliquid.xyz/ws';
 
 // Minimum position size to track (in USD)
-const MIN_POSITION_VALUE = 1_000_000; // $1 million
+const MIN_POSITION_VALUE = 1_000; // $1 thousand
 
 // Assets to monitor - focus on BTC, ETH, and SOL
 const MONITORED_ASSETS = ['BTC', 'ETH', 'SOL'];

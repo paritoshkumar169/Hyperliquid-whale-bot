@@ -56,8 +56,7 @@ export function formatMobyStylePositionClosureTweet(position, stats) {
 
 export async function getWalletStats(wallet, asset) {
   try {
-    // In a production environment, this would fetch real wallet stats
-    // from your database or analytics system
+  
     return null;
   } catch (error) {
     console.error("Error getting wallet stats:", error);

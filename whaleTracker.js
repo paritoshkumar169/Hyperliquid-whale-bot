@@ -15,7 +15,6 @@ import {
 import { TwitterApi } from 'twitter-api-v2';
 import dotenv from 'dotenv';
 import fs from 'fs/promises';
-// Import the new tweet format functions
 import {
   formatMobyStylePositionTweet,
   formatMobyStyleTradeTweet,
@@ -26,7 +25,6 @@ import {
 
 dotenv.config();
 
-// Initialize Twitter client
 const twitterClient = new TwitterApi({
   appKey: process.env.TWITTER_APP_KEY,
   appSecret: process.env.TWITTER_APP_SECRET,
@@ -34,18 +32,14 @@ const twitterClient = new TwitterApi({
   accessSecret: process.env.TWITTER_ACCESS_SECRET,
 });
 
-// Store tracked whale positions - key is wallet-asset
+
 const trackedPositions = new Map();
-// Store recent whale trades
 const recentWhaleTrades = [];
-// Track market stats for each asset
 const marketStats = {};
-// Metadata from Hyperliquid API
 let assetMetadata = null;
-// Mapping of asset names to indices (required for API calls)
+
 const assetIndices = {};
 
-// Initialize market stats for each asset
 MONITORED_ASSETS.forEach(asset => {
   marketStats[asset] = {
     price: 0,
@@ -54,9 +48,65 @@ MONITORED_ASSETS.forEach(asset => {
   };
 });
 
-// Deduplication cache for trades
 const processedTradeIds = new Set();
 const MAX_CACHED_TRADE_IDS = 10000;
+
+
+class RateLimiter {
+  constructor(maxRequests, timeWindow) {
+    this.maxRequests = maxRequests;
+    this.timeWindow = timeWindow;
+    this.requests = [];
+    this.queue = [];
+    this.processing = false;
+  }
+
+  async waitForSlot() {
+    return new Promise((resolve) => {
+      const now = Date.now();
+      this.requests = this.requests.filter(time => now - time < this.timeWindow);
+      
+      if (this.requests.length < this.maxRequests) {
+        this.requests.push(now);
+        resolve();
+      } else {
+
+        this.queue.push(resolve);
+        
+
+        if (!this.processing) {
+          this.processQueue();
+        }
+      }
+    });
+  }
+
+  async processQueue() {
+    this.processing = true;
+    
+    while (this.queue.length > 0) {
+      const now = Date.now();
+      // Remove old requests
+      this.requests = this.requests.filter(time => now - time < this.timeWindow);
+      
+      if (this.requests.length < this.maxRequests) {
+        this.requests.push(now);
+        const resolve = this.queue.shift();
+        resolve();
+      } else {
+        // Wait for a slot to become available
+        const oldestRequest = this.requests[0];
+        const waitTime = this.timeWindow - (now - oldestRequest);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+    }
+    
+    this.processing = false;
+  }
+}
+
+// Create rate limiter: 5 requests per minute
+const tweetRateLimiter = new RateLimiter(5, 60 * 1000);
 
 // Initialize asset indices by fetching universe information
 async function initializeAssetIndices() {
@@ -88,6 +138,8 @@ function handleWebSocketMessage(message) {
     
     // Process whale trades if any
     if (trades && trades.length > 0) {
+      console.log(`Received ${trades.length} trades`);
+      
       // Filter out already processed trades
       const newTrades = trades.filter(trade => {
         if (!trade.tradeId || processedTradeIds.has(trade.tradeId)) {
@@ -109,9 +161,12 @@ function handleWebSocketMessage(message) {
         return true;
       });
       
+      console.log(`Found ${newTrades.length} new trades`);
+      
       // Process new trades
       if (newTrades.length > 0) {
         const whaleTrades = processWhaleTrades(newTrades);
+        console.log(`Found ${whaleTrades.length} whale trades`);
         
         // Add whale trades to recent trades list
         if (whaleTrades.length > 0) {
@@ -126,7 +181,8 @@ function handleWebSocketMessage(message) {
           
           // Post large trades to Twitter
           whaleTrades.forEach(async trade => {
-            if (trade.notionalValue >= 3_000_000) { // Only tweet trades above $3M
+            console.log(`Checking trade for Twitter: $${trade.notionalValue} (threshold: $1,000)`);
+            if (trade.notionalValue >= 1_000) { // Only tweet trades above $1K
               await postTradeToTwitter(trade);
             }
           });
@@ -250,7 +306,7 @@ async function scanWhalePositions() {
       await storePositionData(position);
       
       // Post to Twitter if it's a significant position
-      if (Math.abs(notionalValue) >= 2_000_000) { // Over $2M for tweets
+      if (Math.abs(notionalValue) >= 1_000_000) { // Over $1M for tweets
         await postPositionToTwitter(position);
       }
     } else {
@@ -282,7 +338,7 @@ async function scanWhalePositions() {
         await storePositionData(position);
         
         // Post update to Twitter if significant
-        if (Math.abs(notionalValue) >= 2_000_000 && Math.abs(sizeDelta) * marketStats[asset].price >= 1_000_000) {
+        if (Math.abs(notionalValue) >= 1_000_000 && Math.abs(sizeDelta) * marketStats[asset].price >= 500_000) {
           await postPositionUpdateToTwitter(position);
         }
       }
@@ -318,7 +374,7 @@ async function scanWhalePositions() {
         await storeClosedPosition(position);
         
         // Post closure to Twitter if significant
-        if (Math.abs(position.notionalValue) >= 2_000_000) {
+        if (Math.abs(position.notionalValue) >= 1_000_000) {
           await postPositionClosureToTwitter(position);
         }
       }
@@ -531,11 +587,17 @@ async function storeTradeData(trades) {
 // Post position to Twitter
 async function postPositionToTwitter(position) {
   try {
+    // Wait for rate limit slot
+    await tweetRateLimiter.waitForSlot();
+    
     // Get historical stats for this wallet
     const stats = await getWalletStats(position.wallet, position.asset);
     
-    // Use the new Moby-style tweet format
-    const tweetText = formatMobyStylePositionTweet(position, stats);
+    // Add transaction link if available
+    const txLink = position.hash ? `\n\n🔗 https://hyperliquid.xyz/tx/${position.hash}` : '';
+    
+    // Use the new Moby-style tweet format with transaction link
+    const tweetText = formatMobyStylePositionTweet(position, stats) + txLink;
     
     // Log the tweet
     console.log('Posting to Twitter:');
@@ -552,11 +614,17 @@ async function postPositionToTwitter(position) {
 // Post position update to Twitter
 async function postPositionUpdateToTwitter(position) {
   try {
+    // Wait for rate limit slot
+    await tweetRateLimiter.waitForSlot();
+    
     // Get historical stats for this wallet
     const stats = await getWalletStats(position.wallet, position.asset);
     
-    // Use the new Moby-style tweet format
-    const tweetText = formatMobyStylePositionUpdateTweet(position, stats);
+    // Add transaction link if available
+    const txLink = position.hash ? `\n\n🔗 https://hyperliquid.xyz/tx/${position.hash}` : '';
+    
+    // Use the new Moby-style tweet format with transaction link
+    const tweetText = formatMobyStylePositionUpdateTweet(position, stats) + txLink;
     
     // Log the tweet
     console.log('Posting to Twitter:');
@@ -573,11 +641,17 @@ async function postPositionUpdateToTwitter(position) {
 // Post position closure to Twitter
 async function postPositionClosureToTwitter(position) {
   try {
+    // Wait for rate limit slot
+    await tweetRateLimiter.waitForSlot();
+    
     // Get historical stats for this wallet
     const stats = await getWalletStats(position.wallet, position.asset);
     
-    // Use the new Moby-style tweet format
-    const tweetText = formatMobyStylePositionClosureTweet(position, stats);
+    // Add transaction link if available
+    const txLink = position.hash ? `\n\n🔗 https://hyperliquid.xyz/tx/${position.hash}` : '';
+    
+    // Use the new Moby-style tweet format with transaction link
+    const tweetText = formatMobyStylePositionClosureTweet(position, stats) + txLink;
     
     // Log the tweet
     console.log('Posting to Twitter:');
@@ -594,11 +668,26 @@ async function postPositionClosureToTwitter(position) {
 // Post trade to Twitter
 async function postTradeToTwitter(trade) {
   try {
+    console.log('Attempting to post trade to Twitter:', {
+      asset: trade.asset,
+      size: trade.size,
+      notionalValue: trade.notionalValue,
+      hash: trade.hash
+    });
+    
+    // Wait for rate limit slot
+    console.log('Waiting for rate limit slot...');
+    await tweetRateLimiter.waitForSlot();
+    console.log('Got rate limit slot, proceeding with tweet');
+    
     // Get historical stats for this trade
     const stats = await getWalletStats(trade.wallet || "unknown", trade.asset);
     
-    // Use the new Moby-style tweet format
-    const tweetText = formatMobyStyleTradeTweet(trade, stats);
+    // Add transaction link
+    const txLink = `https://hyperliquid.xyz/tx/${trade.hash}`;
+    
+    // Use the new Moby-style tweet format with transaction link
+    const tweetText = formatMobyStyleTradeTweet(trade, stats) + `\n\n🔗 ${txLink}`;
     
     // Log the tweet
     console.log('Posting to Twitter:');
@@ -609,6 +698,16 @@ async function postTradeToTwitter(trade) {
     console.log('✅ Tweet posted:', tweet.data.id);
   } catch (error) {
     console.error('Error posting to Twitter:', error);
+    // Log more details about the error
+    if (error.data) {
+      console.error('Twitter API Error Details:', error.data);
+    }
+    // If it's a rate limit error, wait and retry
+    if (error.code === 429) {
+      console.log('Rate limit hit, waiting 60 seconds before retrying...');
+      await new Promise(resolve => setTimeout(resolve, 60000));
+      return postTradeToTwitter(trade);
+    }
   }
 }
 
@@ -633,6 +732,18 @@ process.on('SIGTERM', handleShutdown);
 async function main() {
   console.log(`Hyperliquid Whale Bot starting...`);
   console.log(`Monitoring assets: ${MONITORED_ASSETS.join(', ')}`);
+  
+  // Test Twitter connection
+  try {
+    console.log('Testing Twitter connection...');
+    const testTweet = await twitterClient.v2.tweet('🤖 Hyperliquid Whale Bot is now running! Monitoring trades above $1K.');
+    console.log('✅ Twitter test tweet posted:', testTweet.data.id);
+  } catch (error) {
+    console.error('❌ Twitter connection test failed:', error);
+    if (error.data) {
+      console.error('Twitter API Error Details:', error.data);
+    }
+  }
   
   // Initialize asset indices (needed for API calls)
   await initializeAssetIndices();

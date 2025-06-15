@@ -23,13 +23,13 @@ export function formatMobyStylePositionTweet(position, stats) {
 }
 
 export function formatMobyStyleTradeTweet(trade) {
-  const { asset, side, price, notionalValue, liquidationPrice } = trade;
-  if (!price || !notionalValue || !liquidationPrice) {
+  const { asset, side, price, notionalValue } = trade;
+  if (!price || !notionalValue) {
     console.error('Missing required properties in trade object:', trade);
     return 'Error: Missing trade data';
   }
   const action = side === 'BUY' ? 'longed' : 'shorted';
-  return `User ${action} $${(notionalValue/1000).toFixed(0)}K at $${price.toLocaleString()} (liquidation at $${liquidationPrice.toLocaleString()})`;
+  return `User ${action} $${(notionalValue/1000).toFixed(0)}K at $${price.toLocaleString()}`;
 }
 
 export function formatMobyStylePositionUpdateTweet(position, stats) {

@@ -1,33 +1,32 @@
-// hyperliquid.js
 import WebSocket from 'ws';
 import fetch from 'node-fetch';
 import dotenv from 'dotenv';
 dotenv.config();
 
-// Hyperliquid API endpoints
+
 const HYPERLIQUID_API_URL = 'https://api.hyperliquid.xyz';
 const HYPERLIQUID_WS_URL = 'wss://api.hyperliquid.xyz/ws';
 
-// Minimum position size to track (in USD)
-const MIN_POSITION_VALUE = 1_000; // $1 thousand
 
-// Assets to monitor - focus on BTC, ETH, and SOL
+const MIN_POSITION_VALUE = 100_000; 
+
+
 const MONITORED_ASSETS = ['BTC', 'ETH', 'SOL'];
 
-// Cache for asset prices
+
 const assetPriceCache = {
   lastUpdated: 0,
   prices: {}
 };
 
-// WebSocket connection state
+
 let wsConnection = null;
 let wsReconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
 const RECONNECT_DELAY_MS = 5000;
 let wsHeartbeatInterval = null;
 
-// Connect to Hyperliquid WebSocket
+
 function connectWebSocket(messageHandler) {
   if (wsConnection) {
     try {
@@ -46,12 +45,12 @@ function connectWebSocket(messageHandler) {
     console.log('Connected to Hyperliquid WebSocket');
     wsReconnectAttempts = 0;
     
-    // Subscribe to trades for each monitored asset
+    
     MONITORED_ASSETS.forEach(asset => {
       subscribeToAsset(ws, asset);
     });
     
-    // Set up a heartbeat ping to keep the connection alive
+    
     if (wsHeartbeatInterval) {
       clearInterval(wsHeartbeatInterval);
     }
@@ -61,14 +60,14 @@ function connectWebSocket(messageHandler) {
         const pingMsg = JSON.stringify({ method: "ping" });
         ws.send(pingMsg);
       }
-    }, 30000); // 30 second ping
+    }, 30000); 
   });
   
   ws.on('message', (data) => {
     try {
       const message = JSON.parse(data.toString());
       
-      // Handle pong responses
+      
       if (message.channel === 'pong') {
         return;
       }
@@ -86,13 +85,13 @@ function connectWebSocket(messageHandler) {
   ws.on('close', (code, reason) => {
     console.log(`WebSocket connection closed (Code: ${code}, Reason: ${reason})`);
     
-    // Clear heartbeat interval
+    
     if (wsHeartbeatInterval) {
       clearInterval(wsHeartbeatInterval);
       wsHeartbeatInterval = null;
     }
     
-    // Reconnect with exponential backoff
+    
     if (wsReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
       const delay = RECONNECT_DELAY_MS * Math.pow(1.5, wsReconnectAttempts);
       wsReconnectAttempts++;
@@ -112,7 +111,7 @@ function connectWebSocket(messageHandler) {
   return ws;
 }
 
-// Subscribe to an asset's trades
+
 function subscribeToAsset(ws, asset) {
   if (ws.readyState === WebSocket.OPEN) {
     console.log(`Subscribing to ${asset} trades...`);
@@ -129,13 +128,13 @@ function subscribeToAsset(ws, asset) {
   }
 }
 
-// Extract trade data from WebSocket messages
+
 function extractTradeData(message) {
   if (message.channel === 'trades' && Array.isArray(message.data)) {
     return message.data.map(trade => {
       const size = parseFloat(trade.sz);
       
-      // Use actual price from API or fallback to our hardcoded prices
+      
       const asset = trade.coin;
       const price = parseFloat(trade.px);
       const notionalValue = size * price;
@@ -148,19 +147,19 @@ function extractTradeData(message) {
         notionalValue,
         timestamp: new Date(parseInt(trade.time)).toISOString(),
         isWhale: notionalValue >= MIN_POSITION_VALUE,
-        hash: trade.hash, // Transaction hash for linking to explorer
-        tradeId: trade.tid // Unique trade ID
+        hash: trade.hash, 
+        tradeId: trade.tid 
       };
     });
   }
   return null;
 }
 
-// Process whale trades from WebSocket
+
 function processWhaleTrades(trades) {
   if (!trades || !Array.isArray(trades)) return [];
   
-  // Filter for large trades (whale activity)
+  
   const whaleTrades = trades.filter(trade => trade.isWhale);
   
   if (whaleTrades.length > 0) {
@@ -173,19 +172,19 @@ function processWhaleTrades(trades) {
   return whaleTrades;
 }
 
-// Fetch real-time prices directly from Hyperliquid API
+
 async function fetchRealTimePrices() {
   try {
-    // Check if we need to update the cache (every 30 seconds)
+    
     const now = Date.now();
     if (now - assetPriceCache.lastUpdated < 30000 && Object.keys(assetPriceCache.prices).length > 0) {
-      // Use cached prices if they're recent
+      
       return assetPriceCache.prices;
     }
     
     console.log('Fetching real-time prices from Hyperliquid API...');
     
-    // Using Hyperliquid's info endpoint with allMids type as per the docs
+    
     const response = await fetch(`${HYPERLIQUID_API_URL}/info`, {
       method: 'POST',
       headers: {
@@ -202,10 +201,10 @@ async function fetchRealTimePrices() {
     
     const data = await response.json();
     
-    // Build a map of asset prices
+    
     const prices = {};
     
-    // According to docs, response is a simple object with coin as key and price as string value
+    
     if (data && typeof data === 'object') {
       MONITORED_ASSETS.forEach(asset => {
         if (data[asset]) {
@@ -214,7 +213,7 @@ async function fetchRealTimePrices() {
       });
     }
     
-    // Update cache if we got at least one price
+    
     if (Object.keys(prices).length > 0) {
       assetPriceCache.prices = prices;
       assetPriceCache.lastUpdated = now;
@@ -224,66 +223,96 @@ async function fetchRealTimePrices() {
         console.log(`- ${asset}: $${price.toLocaleString()}`);
       });
     } else {
-      console.warn('No prices returned from Hyperliquid API');
-      
-      // If cache has data, keep using it
-      if (Object.keys(assetPriceCache.prices).length > 0) {
-        return assetPriceCache.prices;
-      }
+      console.error('No prices available and API failed.');
+      return {};
     }
     
     return prices;
   } catch (error) {
     console.error('Error fetching real-time prices from Hyperliquid API:', error);
     
-    // If there's an error and we have cached prices, use those
+    
     if (Object.keys(assetPriceCache.prices).length > 0) {
       console.log('Using cached prices due to API error');
       return assetPriceCache.prices;
     }
     
-    // Fallback to hardcoded prices if all else fails
-    console.log('Using fallback hardcoded prices');
-    return {
-      'BTC': 105000,
-      'ETH': 3500,
-      'SOL': 150
-    };
+    
+    console.error('No prices available and API failed.');
+    return {};
   }
 }
 
-// Fetch active positions directly from the Hyperliquid API
+
 async function fetchActivePositions() {
   try {
     console.log('Fetching active whale positions...');
+    const activePositions = [];
     
-    // For real implementation, you would query the Hyperliquid API
-    // to get top positions by size for each asset
-    // This would require additional API calls and data processing
+    for (const asset of MONITORED_ASSETS) {
+      const response = await fetch(`${HYPERLIQUID_API_URL}/info`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          type: "clearinghouseState",
+          coin: asset
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`API response error: ${response.status} ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data && Array.isArray(data)) {
+        data.forEach(position => {
+          if (position && position.position) {
+            const size = parseFloat(position.position.szi);
+            const price = parseFloat(position.position.entryPx);
+            const notionalValue = Math.abs(size) * price;
+            
+            if (notionalValue >= MIN_POSITION_VALUE) {
+              activePositions.push({
+                wallet: position.user,
+                asset,
+                size,
+                direction: size > 0 ? 'LONG' : 'SHORT',
+                notionalValue,
+                entryPrice: price,
+                liquidationPrice: parseFloat(position.position.liquidationPx || 0),
+                leverage: position.position.leverage ? (position.position.leverage.value || 0) : 0,
+                pnl: parseFloat(position.position.unrealizedPnl || 0),
+                timestamp: new Date().toISOString()
+              });
+            }
+          }
+        });
+      }
+    }
     
-    // For now we're just returning an empty array since we'll use
-    // fetchUserPositions to scan known whale wallets
-    
-    return [];
+    return activePositions;
   } catch (error) {
     console.error('Error fetching active positions:', error);
     return [];
   }
 }
 
-// Get position details from the API
+
 async function getPositionDetails(wallet, asset) {
   try {
     console.log(`Getting position details for wallet ${wallet} on ${asset}...`);
     
-    // Fetch user data from API
+    
     const userData = await fetchUserPositions(wallet);
     
     if (!userData || !userData.assetPositions) {
       return null;
     }
     
-    // Find position for the specific asset
+    
     const assetPosition = userData.assetPositions.find(
       pos => pos.position && pos.position.coin === asset
     );
@@ -292,11 +321,11 @@ async function getPositionDetails(wallet, asset) {
       return null;
     }
     
-    // Get current price
+    
     const prices = await fetchRealTimePrices();
     const currentPrice = prices[asset] || 0;
     
-    // Extract position details
+    
     const position = assetPosition.position;
     
     return {
@@ -316,13 +345,13 @@ async function getPositionDetails(wallet, asset) {
   }
 }
 
-// Get current asset price
+
 async function getAssetPrice(asset) {
   const prices = await fetchRealTimePrices();
   return prices[asset] || 0;
 }
 
-// Get supported assets
+
 async function getSupportedAssets() {
   try {
     const prices = await fetchRealTimePrices();
@@ -336,7 +365,7 @@ async function getSupportedAssets() {
   }
 }
 
-// Fetch metadata and asset contexts from Hyperliquid API
+
 async function fetchMetaAndAssetCtxs() {
   try {
     console.log('Fetching asset metadata and contexts...');
@@ -358,9 +387,9 @@ async function fetchMetaAndAssetCtxs() {
     const data = await response.json();
     
     if (Array.isArray(data) && data.length >= 2) {
-      // First element contains metadata
+      
       const metadata = data[0];
-      // Second element contains asset contexts array
+      
       const assetContexts = data[1];
       
       return {
@@ -376,7 +405,7 @@ async function fetchMetaAndAssetCtxs() {
   }
 }
 
-// Fetch user's clearinghouse state (account data) for all positions
+
 async function fetchUserPositions(wallet) {
   try {
     console.log(`Fetching positions for wallet ${wallet}...`);
@@ -403,7 +432,7 @@ async function fetchUserPositions(wallet) {
   }
 }
 
-// Get the universe info (list of available assets)
+
 async function fetchUniverse() {
   try {
     console.log('Fetching universe information...');
@@ -435,7 +464,7 @@ async function fetchUniverse() {
   }
 }
 
-// Close WebSocket connection gracefully
+
 function closeWebSocket() {
   if (wsHeartbeatInterval) {
     clearInterval(wsHeartbeatInterval);

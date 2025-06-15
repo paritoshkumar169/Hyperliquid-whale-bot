@@ -1,4 +1,3 @@
-// whaleTracker.js
 import { 
   connectWebSocket, 
   fetchActivePositions, 
@@ -86,7 +85,6 @@ class RateLimiter {
     
     while (this.queue.length > 0) {
       const now = Date.now();
-      // Remove old requests
       this.requests = this.requests.filter(time => now - time < this.timeWindow);
       
       if (this.requests.length < this.maxRequests) {
@@ -94,7 +92,6 @@ class RateLimiter {
         const resolve = this.queue.shift();
         resolve();
       } else {
-        // Wait for a slot to become available
         const oldestRequest = this.requests[0];
         const waitTime = this.timeWindow - (now - oldestRequest);
         await new Promise(resolve => setTimeout(resolve, waitTime));
@@ -105,10 +102,9 @@ class RateLimiter {
   }
 }
 
-// Create rate limiter: 5 requests per minute
+
 const tweetRateLimiter = new RateLimiter(5, 60 * 1000);
 
-// Initialize asset indices by fetching universe information
 async function initializeAssetIndices() {
   try {
     console.log('Initializing asset indices...');
@@ -130,28 +126,26 @@ async function initializeAssetIndices() {
   }
 }
 
-// Handle WebSocket messages
+
 function handleWebSocketMessage(message) {
   try {
-    // Extract trade data from the message
+
     const trades = extractTradeData(message);
     
-    // Process whale trades if any
     if (trades && trades.length > 0) {
       console.log(`Received ${trades.length} trades`);
       
-      // Filter out already processed trades
+
       const newTrades = trades.filter(trade => {
         if (!trade.tradeId || processedTradeIds.has(trade.tradeId)) {
           return false;
         }
         
-        // Add to processed set
+
         processedTradeIds.add(trade.tradeId);
         
-        // Prune the set if it gets too large
+
         if (processedTradeIds.size > MAX_CACHED_TRADE_IDS) {
-          // Remove oldest entries (this is an approximation since Sets don't maintain order)
           const iterator = processedTradeIds.values();
           for (let i = 0; i < 1000; i++) {
             processedTradeIds.delete(iterator.next().value);
@@ -176,10 +170,10 @@ function handleWebSocketMessage(message) {
             recentWhaleTrades.splice(0, recentWhaleTrades.length - 100);
           }
           
-          // Save whale trades to file
+
           storeTradeData(whaleTrades);
           
-          // Post large trades to Twitter
+
           whaleTrades.forEach(async trade => {
             console.log(`Checking trade for Twitter: $${trade.notionalValue} (threshold: $1,000)`);
             if (trade.notionalValue >= 1_000) { // Only tweet trades above $1K
@@ -203,23 +197,15 @@ function handleWebSocketMessage(message) {
   }
 }
 
-// Scan for new whale positions using Hyperliquid API
 async function scanWhalePositions() {
   console.log('Scanning for whale positions...');
   
-  // Update market stats and prices
   await updateMarketStats();
   
-  // Get list of whales to scan (can be expanded later)
-  const whaleWallets = [
-    // Add known whale wallets here for direct scanning
-    // '0x1234567890abcdef1234567890abcdef12345678'
-  ];
+  const whaleWallets = [];
   
-  // Track all current positions
   const currentPositions = [];
   
-  // If we have whale wallets, scan them directly
   for (const wallet of whaleWallets) {
     try {
       const userData = await fetchUserPositions(wallet);
@@ -244,8 +230,7 @@ async function scanWhalePositions() {
             
             const notionalValue = Math.abs(size) * price;
             
-            if (notionalValue >= 1_000_000) {
-              // This is a whale position
+            if (notionalValue >= 100_000) {
               const formattedPosition = {
                 wallet,
                 asset,
@@ -269,7 +254,6 @@ async function scanWhalePositions() {
     }
   }
   
-  // Also fetch active positions from the API
   try {
     const apiPositions = await fetchActivePositions();
     if (apiPositions && apiPositions.length > 0) {
@@ -281,63 +265,48 @@ async function scanWhalePositions() {
   
   console.log(`Found ${currentPositions.length} total whale positions`);
   
-  // Process each position
   for (const position of currentPositions) {
     const { wallet, asset, size, direction, notionalValue } = position;
     const positionKey = `${wallet}-${asset}`;
     
-    // Check if this is a new position or an existing one
     if (!trackedPositions.has(positionKey)) {
       console.log(`New whale position detected: ${wallet} ${direction} ${Math.abs(size)} ${asset} ($${notionalValue.toLocaleString()})`);
       
-      // Calculate additional analytics
       position.percentOfOI = calculatePercentOfOI(position);
       position.riskLevel = calculateRiskLevel(position);
       position.marketImpact = estimateMarketImpact(position);
       position.liquidationRisk = calculateLiquidationRisk(position);
       
-      // Save to tracked positions
       trackedPositions.set(positionKey, position);
       
-      // Log the position details
       console.log(JSON.stringify(position, null, 2));
       
-      // Store the position data to a JSON file
       await storePositionData(position);
       
-      // Post to Twitter if it's a significant position
-      if (Math.abs(notionalValue) >= 1_000_000) { // Over $1M for tweets
+      if (Math.abs(notionalValue) >= 1_000_000) {
         await postPositionToTwitter(position);
       }
     } else {
-      // Position already tracked, check for significant changes
       const existingPosition = trackedPositions.get(positionKey);
       const sizeDelta = Math.abs(size) - Math.abs(existingPosition.size);
       
-      // If position size changed by more than 10%, update and notify
       if (Math.abs(sizeDelta) / Math.abs(existingPosition.size) > 0.1) {
         console.log(`Whale position updated: ${wallet} ${direction} ${Math.abs(size)} ${asset} (${sizeDelta > 0 ? "+" : ""}${sizeDelta.toFixed(2)})`);
         
-        // Update position details
         position.previousSize = existingPosition.size;
         position.sizeDelta = sizeDelta;
         
-        // Calculate additional analytics
         position.percentOfOI = calculatePercentOfOI(position);
         position.riskLevel = calculateRiskLevel(position);
         position.marketImpact = estimateMarketImpact(position);
         position.liquidationRisk = calculateLiquidationRisk(position);
         
-        // Update tracked position
         trackedPositions.set(positionKey, position);
         
-        // Log the position details
         console.log(JSON.stringify(position, null, 2));
         
-        // Store the position data
         await storePositionData(position);
         
-        // Post update to Twitter if significant
         if (Math.abs(notionalValue) >= 1_000_000 && Math.abs(sizeDelta) * marketStats[asset].price >= 500_000) {
           await postPositionUpdateToTwitter(position);
         }
@@ -345,18 +314,15 @@ async function scanWhalePositions() {
     }
   }
   
-  // Check for closed positions by checking if they still exist in the current scan
   const currentPositionKeys = new Set(currentPositions.map(p => `${p.wallet}-${p.asset}`));
   
   for (const [positionKey, position] of trackedPositions.entries()) {
     if (!currentPositionKeys.has(positionKey)) {
       console.log(`Whale position closed: ${position.wallet} ${position.direction} ${Math.abs(position.size)} ${position.asset}`);
       
-      // Mark as closed and store final state
       position.closed = true;
       position.closedAt = new Date().toISOString();
       
-      // Calculate final P&L if possible
       const asset = position.asset;
       if (position.entryPrice && marketStats[asset] && marketStats[asset].price) {
         const exitPrice = marketStats[asset].price;
@@ -370,16 +336,13 @@ async function scanWhalePositions() {
         position.finalPnl = pnlAmount;
         position.finalPnlPercent = pnlPercent;
         
-        // Store the closed position
         await storeClosedPosition(position);
         
-        // Post closure to Twitter if significant
         if (Math.abs(position.notionalValue) >= 1_000_000) {
           await postPositionClosureToTwitter(position);
         }
       }
       
-      // Remove from tracked positions
       trackedPositions.delete(positionKey);
     }
   }
@@ -504,17 +467,39 @@ async function storePositionData(position) {
   }
 }
 
-// Store closed position data
+async function updateWalletStats(position) {
+  try {
+    const wallet = position.wallet;
+    const f = `data/wallets/${wallet}.json`;
+    let stats = { trades: 0, wins: 0, pnl: 0, volume: 0 };
+    
+    try {
+      const raw = await fs.readFile(f, 'utf8');
+      stats = JSON.parse(raw);
+    } catch (error) {
+      // File doesn't exist yet, use default stats
+    }
+    
+    stats.trades += 1;
+    if (position.finalPnl > 0) {
+      stats.wins += 1;
+    }
+    stats.pnl += position.finalPnl;
+    stats.volume += position.notionalValue;
+    
+    await fs.writeFile(f, JSON.stringify(stats, null, 2));
+    console.log(`Updated wallet stats for ${wallet}`);
+  } catch (error) {
+    console.error('Error updating wallet stats:', error);
+  }
+}
+
 async function storeClosedPosition(position) {
   try {
-    // Create directory if it doesn't exist
     await fs.mkdir('data', { recursive: true });
-    
-    // Create asset-specific directory
     const assetDir = `data/${position.asset}`;
     await fs.mkdir(assetDir, { recursive: true });
     
-    // Read existing data or create new array
     let closedPositions = [];
     try {
       const data = await fs.readFile(`${assetDir}/closed_positions.json`, 'utf8');
@@ -523,13 +508,13 @@ async function storeClosedPosition(position) {
       // File doesn't exist yet, use empty array
     }
     
-    // Add closed position
     closedPositions.push(position);
-    
-    // Write back to file
     await fs.writeFile(`${assetDir}/closed_positions.json`, JSON.stringify(closedPositions, null, 2));
-    
     console.log(`Closed position data saved for ${position.wallet} on ${position.asset}`);
+    
+    if (position.closed) {
+      await updateWalletStats(position);
+    }
   } catch (error) {
     console.error('Error storing closed position data:', error);
   }
@@ -587,127 +572,66 @@ async function storeTradeData(trades) {
 // Post position to Twitter
 async function postPositionToTwitter(position) {
   try {
-    // Wait for rate limit slot
     await tweetRateLimiter.waitForSlot();
-    
-    // Get historical stats for this wallet
     const stats = await getWalletStats(position.wallet, position.asset);
-    
-    // Add transaction link if available
-    const txLink = position.hash ? `\n\n🔗 https://hyperliquid.xyz/tx/${position.hash}` : '';
-    
-    // Use the new Moby-style tweet format with transaction link
+    const txLink = position.hash ? `\n\n🔗 https://app.hyperliquid.xyz/explorer/tx/${position.hash}` : '';
     const tweetText = formatMobyStylePositionTweet(position, stats) + txLink;
-    
-    // Log the tweet
-    console.log('Posting to Twitter:');
+    console.log('Would post to Twitter:');
     console.log(tweetText);
-    
-    // Actually post to Twitter
-    const tweet = await twitterClient.v2.tweet(tweetText);
-    console.log('✅ Tweet posted:', tweet.data.id);
+    await fs.appendFile('tweets.log', `[${new Date().toISOString()}] Position Tweet: ${tweetText}\n`);
   } catch (error) {
-    console.error('Error posting to Twitter:', error);
+    console.error('Error logging position tweet:', error);
   }
 }
 
 // Post position update to Twitter
 async function postPositionUpdateToTwitter(position) {
   try {
-    // Wait for rate limit slot
     await tweetRateLimiter.waitForSlot();
-    
-    // Get historical stats for this wallet
     const stats = await getWalletStats(position.wallet, position.asset);
-    
-    // Add transaction link if available
-    const txLink = position.hash ? `\n\n🔗 https://hyperliquid.xyz/tx/${position.hash}` : '';
-    
-    // Use the new Moby-style tweet format with transaction link
+    const txLink = position.hash ? `\n\n🔗 https://app.hyperliquid.xyz/explorer/tx/${position.hash}` : '';
     const tweetText = formatMobyStylePositionUpdateTweet(position, stats) + txLink;
-    
-    // Log the tweet
-    console.log('Posting to Twitter:');
+    console.log('Would post to Twitter:');
     console.log(tweetText);
-    
-    // Actually post to Twitter
-    const tweet = await twitterClient.v2.tweet(tweetText);
-    console.log('✅ Tweet posted:', tweet.data.id);
+    await fs.appendFile('tweets.log', `[${new Date().toISOString()}] Position Update Tweet: ${tweetText}\n`);
   } catch (error) {
-    console.error('Error posting to Twitter:', error);
+    console.error('Error logging position update tweet:', error);
   }
 }
 
 // Post position closure to Twitter
 async function postPositionClosureToTwitter(position) {
   try {
-    // Wait for rate limit slot
     await tweetRateLimiter.waitForSlot();
-    
-    // Get historical stats for this wallet
     const stats = await getWalletStats(position.wallet, position.asset);
-    
-    // Add transaction link if available
-    const txLink = position.hash ? `\n\n🔗 https://hyperliquid.xyz/tx/${position.hash}` : '';
-    
-    // Use the new Moby-style tweet format with transaction link
+    const txLink = position.hash ? `\n\n🔗 https://app.hyperliquid.xyz/explorer/tx/${position.hash}` : '';
     const tweetText = formatMobyStylePositionClosureTweet(position, stats) + txLink;
-    
-    // Log the tweet
-    console.log('Posting to Twitter:');
+    console.log('Would post to Twitter:');
     console.log(tweetText);
-    
-    // Actually post to Twitter
-    const tweet = await twitterClient.v2.tweet(tweetText);
-    console.log('✅ Tweet posted:', tweet.data.id);
+    await fs.appendFile('tweets.log', `[${new Date().toISOString()}] Position Closure Tweet: ${tweetText}\n`);
   } catch (error) {
-    console.error('Error posting to Twitter:', error);
+    console.error('Error logging position closure tweet:', error);
   }
 }
 
 // Post trade to Twitter
 async function postTradeToTwitter(trade) {
   try {
-    console.log('Attempting to post trade to Twitter:', {
+    console.log('Attempting to log trade tweet:', {
       asset: trade.asset,
       size: trade.size,
       notionalValue: trade.notionalValue,
       hash: trade.hash
     });
-    
-    // Wait for rate limit slot
-    console.log('Waiting for rate limit slot...');
     await tweetRateLimiter.waitForSlot();
-    console.log('Got rate limit slot, proceeding with tweet');
-    
-    // Get historical stats for this trade
     const stats = await getWalletStats(trade.wallet || "unknown", trade.asset);
-    
-    // Add transaction link
-    const txLink = `https://hyperliquid.xyz/tx/${trade.hash}`;
-    
-    // Use the new Moby-style tweet format with transaction link
+    const txLink = `https://app.hyperliquid.xyz/explorer/tx/${trade.hash}`;
     const tweetText = formatMobyStyleTradeTweet(trade, stats) + `\n\n🔗 ${txLink}`;
-    
-    // Log the tweet
-    console.log('Posting to Twitter:');
+    console.log('Would post to Twitter:');
     console.log(tweetText);
-    
-    // Actually post to Twitter
-    const tweet = await twitterClient.v2.tweet(tweetText);
-    console.log('✅ Tweet posted:', tweet.data.id);
+    await fs.appendFile('tweets.log', `[${new Date().toISOString()}] Trade Tweet: ${tweetText}\n`);
   } catch (error) {
-    console.error('Error posting to Twitter:', error);
-    // Log more details about the error
-    if (error.data) {
-      console.error('Twitter API Error Details:', error.data);
-    }
-    // If it's a rate limit error, wait and retry
-    if (error.code === 429) {
-      console.log('Rate limit hit, waiting 60 seconds before retrying...');
-      await new Promise(resolve => setTimeout(resolve, 60000));
-      return postTradeToTwitter(trade);
-    }
+    console.error('Error logging trade tweet:', error);
   }
 }
 

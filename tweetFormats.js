@@ -1,4 +1,5 @@
 import fs from 'fs/promises';
+import { HYPERLIQUID_API_URL } from './hyperliquid.js';
 
 export function formatMobyStylePositionTweet(position, stats) {
   const { wallet, asset, direction, notionalValue, leverage, liquidationPrice } = position;
@@ -22,10 +23,13 @@ export function formatMobyStylePositionTweet(position, stats) {
 }
 
 export function formatMobyStyleTradeTweet(trade) {
-  const { asset, side, price, notionalValue, leverage, liquidationPrice } = trade;
+  const { asset, side, price, notionalValue, liquidationPrice } = trade;
+  if (!price || !notionalValue || !liquidationPrice) {
+    console.error('Missing required properties in trade object:', trade);
+    return 'Error: Missing trade data';
+  }
   const action = side === 'BUY' ? 'longed' : 'shorted';
-  
-  return `User ${action} $${(notionalValue/1000).toFixed(0)}K at $${price.toLocaleString()} (${leverage}x leverage, liquidation at $${liquidationPrice.toLocaleString()})`;
+  return `User ${action} $${(notionalValue/1000).toFixed(0)}K at $${price.toLocaleString()} (liquidation at $${liquidationPrice.toLocaleString()})`;
 }
 
 export function formatMobyStylePositionUpdateTweet(position, stats) {
@@ -59,13 +63,46 @@ export function formatMobyStylePositionClosureTweet(position, stats) {
 
 export async function getWalletStats(wallet) {
   try {
-    const f = `data/wallets/${wallet}.json`;
-    const raw = await fs.readFile(f, 'utf8');
-    const s = JSON.parse(raw);
-    const winRate = s.trades ? ((s.wins / s.trades) * 100).toFixed(0) : 0;
-    return { winRate, pnl: `$${s.pnl.toLocaleString()}`, totalVolume: s.volume };
+    const response = await fetch(`${HYPERLIQUID_API_URL}/info`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        type: "clearinghouseState",
+        user: wallet
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`API response error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const stats = {
+      trades: 0,
+      wins: 0,
+      pnl: 0,
+      volume: 0
+    };
+
+    if (data && data.assetPositions) {
+      data.assetPositions.forEach(position => {
+        if (position.position) {
+          stats.trades += 1;
+          if (parseFloat(position.position.unrealizedPnl) > 0) {
+            stats.wins += 1;
+          }
+          stats.pnl += parseFloat(position.position.unrealizedPnl || 0);
+          stats.volume += Math.abs(parseFloat(position.position.szi) * parseFloat(position.position.entryPx));
+        }
+      });
+    }
+
+    const winRate = stats.trades ? ((stats.wins / stats.trades) * 100).toFixed(0) : 0;
+    return { winRate, pnl: `$${stats.pnl.toLocaleString()}`, totalVolume: stats.volume };
   } catch (error) {
     console.error("Error getting wallet stats:", error);
-    return null;
+    return { winRate: 0, pnl: "$0", totalVolume: 0 };
   }
 } 

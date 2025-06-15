@@ -175,8 +175,8 @@ function handleWebSocketMessage(message) {
           
 
           whaleTrades.forEach(async trade => {
-            console.log(`Checking trade for Twitter: $${trade.notionalValue} (threshold: $1,000)`);
-            if (trade.notionalValue >= 1_000) { // Only tweet trades above $1K
+            console.log(`Checking trade for Twitter: $${trade.notionalValue} (threshold: $100,000)`);
+            if (trade.notionalValue >= 100_000) { // Only tweet trades above $100K
               await postTradeToTwitter(trade);
             }
           });
@@ -576,11 +576,10 @@ async function postPositionToTwitter(position) {
     const stats = await getWalletStats(position.wallet, position.asset);
     const txLink = position.hash ? `\n\n🔗 https://app.hyperliquid.xyz/explorer/tx/${position.hash}` : '';
     const tweetText = formatMobyStylePositionTweet(position, stats) + txLink;
-    console.log('Would post to Twitter:');
-    console.log(tweetText);
-    await fs.appendFile('tweets.log', `[${new Date().toISOString()}] Position Tweet: ${tweetText}\n`);
+    console.log('Posting to Twitter:', tweetText);
+    await twitterClient.v2.tweet(tweetText);
   } catch (error) {
-    console.error('Error logging position tweet:', error);
+    console.error('Error posting position tweet:', error);
   }
 }
 
@@ -591,11 +590,10 @@ async function postPositionUpdateToTwitter(position) {
     const stats = await getWalletStats(position.wallet, position.asset);
     const txLink = position.hash ? `\n\n🔗 https://app.hyperliquid.xyz/explorer/tx/${position.hash}` : '';
     const tweetText = formatMobyStylePositionUpdateTweet(position, stats) + txLink;
-    console.log('Would post to Twitter:');
-    console.log(tweetText);
-    await fs.appendFile('tweets.log', `[${new Date().toISOString()}] Position Update Tweet: ${tweetText}\n`);
+    console.log('Posting to Twitter:', tweetText);
+    await twitterClient.v2.tweet(tweetText);
   } catch (error) {
-    console.error('Error logging position update tweet:', error);
+    console.error('Error posting position update tweet:', error);
   }
 }
 
@@ -606,32 +604,30 @@ async function postPositionClosureToTwitter(position) {
     const stats = await getWalletStats(position.wallet, position.asset);
     const txLink = position.hash ? `\n\n🔗 https://app.hyperliquid.xyz/explorer/tx/${position.hash}` : '';
     const tweetText = formatMobyStylePositionClosureTweet(position, stats) + txLink;
-    console.log('Would post to Twitter:');
-    console.log(tweetText);
-    await fs.appendFile('tweets.log', `[${new Date().toISOString()}] Position Closure Tweet: ${tweetText}\n`);
+    console.log('Posting to Twitter:', tweetText);
+    await twitterClient.v2.tweet(tweetText);
   } catch (error) {
-    console.error('Error logging position closure tweet:', error);
+    console.error('Error posting position closure tweet:', error);
   }
 }
 
 // Post trade to Twitter
 async function postTradeToTwitter(trade) {
   try {
-    console.log('Attempting to log trade tweet:', {
+    console.log('Attempting to post trade tweet:', {
       asset: trade.asset,
       size: trade.size,
       notionalValue: trade.notionalValue,
-      hash: trade.hash
+      explorerLink: `https://app.hyperliquid.xyz/explorer/tx/${trade.hash}`
     });
     await tweetRateLimiter.waitForSlot();
     const stats = await getWalletStats(trade.wallet || "unknown", trade.asset);
     const txLink = `https://app.hyperliquid.xyz/explorer/tx/${trade.hash}`;
     const tweetText = formatMobyStyleTradeTweet(trade, stats) + `\n\n🔗 ${txLink}`;
-    console.log('Would post to Twitter:');
-    console.log(tweetText);
-    await fs.appendFile('tweets.log', `[${new Date().toISOString()}] Trade Tweet: ${tweetText}\n`);
+    console.log('Posting to Twitter:', tweetText);
+    await twitterClient.v2.tweet(tweetText);
   } catch (error) {
-    console.error('Error logging trade tweet:', error);
+    console.error('Error posting trade tweet:', error);
   }
 }
 
@@ -659,8 +655,10 @@ async function main() {
   
   // Test Twitter connection
   try {
+    const now = new Date().toISOString();
+    const testTweetText = `🤖 Hyperliquid Whale Bot is now running! Monitoring trades above $100K. (${now})`;
     console.log('Testing Twitter connection...');
-    const testTweet = await twitterClient.v2.tweet('🤖 Hyperliquid Whale Bot is now running! Monitoring trades above $1K.');
+    const testTweet = await twitterClient.v2.tweet(testTweetText);
     console.log('✅ Twitter test tweet posted:', testTweet.data.id);
   } catch (error) {
     console.error('❌ Twitter connection test failed:', error);

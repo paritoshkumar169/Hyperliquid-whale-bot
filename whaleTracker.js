@@ -127,24 +127,20 @@ async function initializeAssetIndices() {
 }
 
 
-function handleWebSocketMessage(message) {
+async function handleWebSocketMessage(message) {
   try {
-
-    const trades = extractTradeData(message);
+    const trades = await extractTradeData(message);
     
     if (trades && trades.length > 0) {
       console.log(`Received ${trades.length} trades`);
       
-
       const newTrades = trades.filter(trade => {
         if (!trade.tradeId || processedTradeIds.has(trade.tradeId)) {
           return false;
         }
         
-
         processedTradeIds.add(trade.tradeId);
         
-
         if (processedTradeIds.size > MAX_CACHED_TRADE_IDS) {
           const iterator = processedTradeIds.values();
           for (let i = 0; i < 1000; i++) {
@@ -170,10 +166,8 @@ function handleWebSocketMessage(message) {
             recentWhaleTrades.splice(0, recentWhaleTrades.length - 100);
           }
           
-
           storeTradeData(whaleTrades);
           
-
           whaleTrades.forEach(async trade => {
             console.log(`Checking trade for Twitter: $${trade.notionalValue} (threshold: $50,000)`);
             if (trade.notionalValue >= 50_000) { // Only log trades above $50K

@@ -27,6 +27,9 @@ const RECONNECT_DELAY_MS = 5000;
 let wsHeartbeatInterval = null;
 
 
+const assetIndices = {};
+
+
 function connectWebSocket(messageHandler) {
   if (wsConnection) {
     try {
@@ -45,11 +48,9 @@ function connectWebSocket(messageHandler) {
     console.log('Connected to Hyperliquid WebSocket');
     wsReconnectAttempts = 0;
     
-    
     MONITORED_ASSETS.forEach(asset => {
       subscribeToAsset(ws, asset);
     });
-    
     
     if (wsHeartbeatInterval) {
       clearInterval(wsHeartbeatInterval);
@@ -63,18 +64,17 @@ function connectWebSocket(messageHandler) {
     }, 30000); 
   });
   
-  ws.on('message', (data) => {
+  ws.on('message', async (data) => {
     try {
       const message = JSON.parse(data.toString());
-      
       
       if (message.channel === 'pong') {
         return;
       }
       
-      messageHandler(message);
+      await messageHandler(message);
     } catch (error) {
-      console.error('Error parsing WebSocket message:', error);
+      console.error('Error processing WebSocket message:', error);
     }
   });
   
@@ -85,12 +85,10 @@ function connectWebSocket(messageHandler) {
   ws.on('close', (code, reason) => {
     console.log(`WebSocket connection closed (Code: ${code}, Reason: ${reason})`);
     
-    
     if (wsHeartbeatInterval) {
       clearInterval(wsHeartbeatInterval);
       wsHeartbeatInterval = null;
     }
-    
     
     if (wsReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
       const delay = RECONNECT_DELAY_MS * Math.pow(1.5, wsReconnectAttempts);
@@ -133,14 +131,10 @@ function extractTradeData(message) {
   if (message.channel === 'trades' && Array.isArray(message.data)) {
     return message.data.map(trade => {
       const [buyer, seller] = trade.users || [];
-      const wallets = [buyer, seller];  
-
-  
-      const multiplier = 10 ** -(assetCtxs[assetIndices[trade.coin]]?.szDecimals || 0);
-      const size = parseFloat(trade.sz) * multiplier;
+      const wallets = [buyer, seller];
+      const size = parseFloat(trade.sz);
       const price = parseFloat(trade.px);
       const notionalValue = size * price;
-      
       return {
         asset: trade.coin,
         side: trade.side === 'B' ? 'BUY' : 'SELL',
@@ -251,13 +245,6 @@ async function fetchActivePositions() {
   try {
     console.log('Fetching active whale positions...');
     const activePositions = [];
-    
- 
-    const metaData = await fetchMetaAndAssetCtxs();
-    if (!metaData || !metaData.assetContexts) {
-      throw new Error('Failed to fetch asset contexts');
-    }
-    
     for (const asset of MONITORED_ASSETS) {
       const response = await fetch(`${HYPERLIQUID_API_URL}/info`, {
         method: 'POST',
@@ -269,25 +256,17 @@ async function fetchActivePositions() {
           coin: asset
         })
       });
-      
       if (!response.ok) {
-        const msg = await response.text(); 
+        const msg = await response.text();
         throw new Error(`API ${response.status} ${response.statusText}: ${msg}`);
       }
-      
       const data = await response.json();
-      
       if (data && Array.isArray(data)) {
-        
-        const assetIndex = assetIndices[asset];
-        const multiplier = 10 ** -(metaData.assetContexts[assetIndex]?.szDecimals || 0);
-        
         data.forEach(position => {
           if (position && position.position) {
-            const size = parseFloat(position.position.szi) * multiplier;   
+            const size = parseFloat(position.position.szi);
             const price = parseFloat(position.position.entryPx);
             const notionalValue = Math.abs(size) * price;
-            
             if (notionalValue >= MIN_POSITION_VALUE) {
               activePositions.push({
                 wallet: position.user,
@@ -308,11 +287,10 @@ async function fetchActivePositions() {
         });
       }
     }
-    
     return activePositions;
   } catch (error) {
     console.error('fetchActivePositions failed:', error.message);
-    return []; 
+    return [];
   }
 }
 
@@ -448,37 +426,24 @@ function closeWebSocket() {
 }
 
 async function getPositionDetails(wallet, asset) {
-  if (!wallet) return null; 
-  
+  if (!wallet) return null;
   try {
-   
-    const metaData = await fetchMetaAndAssetCtxs();
-    if (!metaData || !metaData.assetContexts) {
-      throw new Error('Failed to fetch asset contexts');
-    }
-
     const res = await fetch(`${HYPERLIQUID_API_URL}/info`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: "clearinghouseState", user: wallet })
     });
     const data = await res.json();
-
     const row = data.assetPositions.find(p => p.position && p.position.coin === asset);
     if (!row) return null;
-
     const pos = row.position;
-  
-    const assetIndex = assetIndices[asset];
-    const multiplier = 10 ** -(metaData.assetContexts[assetIndex]?.szDecimals || 0);
-
     return {
       wallet,
       asset,
-      size: parseFloat(pos.szi) * multiplier,  
+      size: parseFloat(pos.szi),
       entryPrice: parseFloat(pos.entryPx),
-      leverage: typeof pos.leverage === 'number' 
-        ? pos.leverage 
+      leverage: typeof pos.leverage === 'number'
+        ? pos.leverage
         : (pos.leverage?.value ?? 1),
       liquidationPrice: parseFloat(pos.liquidationPx ?? pos.liqPx ?? 0),
       timestamp: new Date().toISOString()

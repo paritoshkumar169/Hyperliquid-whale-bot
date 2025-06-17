@@ -175,8 +175,8 @@ function handleWebSocketMessage(message) {
           
 
           whaleTrades.forEach(async trade => {
-            console.log(`Checking trade for Twitter: $${trade.notionalValue} (threshold: $100,000)`);
-            if (trade.notionalValue >= 100_000) { // Only tweet trades above $100K
+            console.log(`Checking trade for Twitter: $${trade.notionalValue} (threshold: $50,000)`);
+            if (trade.notionalValue >= 50_000) { // Only log trades above $50K
               await postTradeToTwitter(trade);
             }
           });
@@ -614,20 +614,73 @@ async function postPositionClosureToTwitter(position) {
 // Post trade to Twitter
 async function postTradeToTwitter(trade) {
   try {
-    console.log('Attempting to post trade tweet:', {
+    console.log('Logging whale trade:', {
       asset: trade.asset,
       size: trade.size,
       notionalValue: trade.notionalValue,
       explorerLink: `https://app.hyperliquid.xyz/explorer/tx/${trade.hash}`
     });
-    await tweetRateLimiter.waitForSlot();
-    const stats = await getWalletStats(trade.wallet || "unknown", trade.asset);
+
+    // Initialize trade with default values
+    const tradeData = {
+      ...trade,
+      liquidationPrice: 0,
+      leverage: 1,
+      entryPrice: trade.price
+    };
+
+    // Try to fetch position details, but don't fail if we can't get them
+    try {
+      const pos = await getPositionDetails(trade.wallet, trade.asset);
+      if (pos) {
+        tradeData.leverage = pos.leverage;
+        tradeData.liquidationPrice = pos.liquidationPrice;
+        tradeData.entryPrice = pos.entryPrice;
+        tradeData.size = pos.size;
+      }
+    } catch (error) {
+      console.log('Could not fetch position details:', error.message);
+    }
+
+    // Try to get wallet stats, but don't fail if we can't get them
+    let stats = null;
+    try {
+      stats = await getWalletStats(trade.wallet || "unknown", trade.asset);
+    } catch (error) {
+      console.log('Could not fetch wallet stats:', error.message);
+    }
+
     const txLink = `https://app.hyperliquid.xyz/explorer/tx/${trade.hash}`;
-    const tweetText = formatMobyStyleTradeTweet(trade, stats) + `\n\n🔗 ${txLink}`;
-    console.log('Posting to Twitter:', tweetText);
-    await twitterClient.v2.tweet(tweetText);
+    const tweetText = formatMobyStyleTradeTweet(tradeData, stats) + `\n\n🔗 ${txLink}`;
+    console.log('Logged whale trade:', tweetText);
+
+    // Log to JSON file
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      trade: tradeData,
+      tweetText: tweetText
+    };
+
+    // Create directory if it doesn't exist
+    await fs.mkdir('logs', { recursive: true });
+
+    // Read existing logs or create new array
+    let logs = [];
+    try {
+      const data = await fs.readFile('logs/whale_trades_log.json', 'utf8');
+      logs = JSON.parse(data);
+    } catch (error) {
+      // File doesn't exist yet, use empty array
+    }
+
+    // Add new log entry
+    logs.push(logEntry);
+
+    // Write back to file
+    await fs.writeFile('logs/whale_trades_log.json', JSON.stringify(logs, null, 2));
+    console.log('Whale trade logged to file.');
   } catch (error) {
-    console.error('Error posting trade tweet:', error);
+    console.error('Error logging whale trade:', error);
   }
 }
 

@@ -256,13 +256,14 @@ async function fetchActivePositions() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          type: "clearinghouseState",
+          type: "globalPositions",
           coin: asset
         })
       });
       
       if (!response.ok) {
-        throw new Error(`API response error: ${response.status} ${response.statusText}`);
+        const msg = await response.text(); // Capture body for error message
+        throw new Error(`API ${response.status} ${response.statusText}: ${msg}`);
       }
       
       const data = await response.json();
@@ -295,53 +296,8 @@ async function fetchActivePositions() {
     
     return activePositions;
   } catch (error) {
-    console.error('Error fetching active positions:', error);
-    return [];
-  }
-}
-
-
-async function getPositionDetails(wallet, asset) {
-  try {
-    console.log(`Getting position details for wallet ${wallet} on ${asset}...`);
-    
-    
-    const userData = await fetchUserPositions(wallet);
-    
-    if (!userData || !userData.assetPositions) {
-      return null;
-    }
-    
-    
-    const assetPosition = userData.assetPositions.find(
-      pos => pos.position && pos.position.coin === asset
-    );
-    
-    if (!assetPosition || !assetPosition.position) {
-      return null;
-    }
-    
-    
-    const prices = await fetchRealTimePrices();
-    const currentPrice = prices[asset] || 0;
-    
-    
-    const position = assetPosition.position;
-    
-    return {
-      wallet,
-      asset,
-      size: parseFloat(position.szi),
-      entryPrice: parseFloat(position.entryPx),
-      currentPrice,
-      pnl: parseFloat(position.unrealizedPnl || 0),
-      liquidationPrice: parseFloat(position.liquidationPx || 0),
-      leverage: position.leverage ? (position.leverage.value || 0) : 0,
-      timestamp: new Date().toISOString()
-    };
-  } catch (error) {
-    console.error(`Error fetching position details for ${wallet}:`, error);
-    return null;
+    console.error('fetchActivePositions failed:', error.message);
+    return []; // Keep bot alive
   }
 }
 
@@ -473,6 +429,34 @@ function closeWebSocket() {
   
   if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
     wsConnection.close(1000, 'Application shutting down');
+  }
+}
+
+async function getPositionDetails(wallet, asset) {
+  try {
+    const res = await fetch(`${HYPERLIQUID_API_URL}/info`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: "clearinghouseState", user: wallet })
+    });
+    const data = await res.json();
+
+    const row = data.assetPositions.find(p => p.position && p.position.coin === asset);
+    if (!row) return null;
+
+    const pos = row.position;
+    return {
+      wallet,
+      asset,
+      size: parseFloat(pos.szi),
+      entryPrice: parseFloat(pos.entryPx),
+      leverage: pos.leverage?.value || 1,
+      liquidationPrice: parseFloat(pos.liquidationPx || 0),
+      timestamp: new Date().toISOString()
+    };
+  } catch (e) {
+    console.error('getPositionDetails', e);
+    return null;
   }
 }
 

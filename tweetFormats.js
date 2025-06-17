@@ -23,13 +23,14 @@ export function formatMobyStylePositionTweet(position, stats) {
 }
 
 export function formatMobyStyleTradeTweet(trade) {
-  const { asset, side, price, notionalValue } = trade;
+  const { asset, side, price, notionalValue, wallet, liquidationPrice } = trade;
   if (!price || !notionalValue) {
     console.error('Missing required properties in trade object:', trade);
     return 'Error: Missing trade data';
   }
   const action = side === 'BUY' ? 'longed' : 'shorted';
-  return `User ${action} $${(notionalValue/1000).toFixed(0)}K at $${price.toLocaleString()}`;
+  const shortWallet = wallet ? `${wallet.substring(0, 6)}...${wallet.substring(wallet.length - 4)}` : 'Unknown Wallet';
+  return `User ${action} $${(notionalValue/1000).toFixed(0)}K at $${price.toLocaleString()}\nAsset: $${asset}\nPosition: ${trade.size.toFixed(4)} ${asset}\nLiquidation: $${liquidationPrice.toLocaleString()}\n${shortWallet}`;
 }
 
 export function formatMobyStylePositionUpdateTweet(position, stats) {
@@ -75,7 +76,8 @@ export async function getWalletStats(wallet) {
     });
 
     if (!response.ok) {
-      throw new Error(`API response error: ${response.status} ${response.statusText}`);
+      const msg = await response.text(); // Capture body for error message
+      throw new Error(`API ${response.status} ${response.statusText}: ${msg}`);
     }
 
     const data = await response.json();

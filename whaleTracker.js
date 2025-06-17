@@ -629,23 +629,27 @@ async function postTradeToTwitter(trade) {
       entryPrice: trade.price
     };
 
-    // Try to fetch position details, but don't fail if we can't get them
-    try {
-      const pos = await getPositionDetails(trade.wallet, trade.asset);
-      if (pos) {
-        tradeData.leverage = pos.leverage;
-        tradeData.liquidationPrice = pos.liquidationPrice;
-        tradeData.entryPrice = pos.entryPrice;
-        tradeData.size = pos.size;
+    // Try each wallet address until we find one with a position
+    let pos = null;
+    for (const w of trade.wallets) {
+      pos = await getPositionDetails(w, trade.asset);
+      if (pos) { 
+        tradeData.wallet = w; 
+        break; 
       }
-    } catch (error) {
-      console.log('Could not fetch position details:', error.message);
+    }
+
+    if (pos) {
+      tradeData.leverage = pos.leverage;
+      tradeData.liquidationPrice = pos.liquidationPrice;
+      tradeData.entryPrice = pos.entryPrice;
+      tradeData.size = pos.size;
     }
 
     // Try to get wallet stats, but don't fail if we can't get them
     let stats = null;
     try {
-      stats = await getWalletStats(trade.wallet || "unknown", trade.asset);
+      stats = await getWalletStats(tradeData.wallet || "unknown", trade.asset);
     } catch (error) {
       console.log('Could not fetch wallet stats:', error.message);
     }

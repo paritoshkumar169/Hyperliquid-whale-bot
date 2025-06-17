@@ -132,23 +132,24 @@ function subscribeToAsset(ws, asset) {
 function extractTradeData(message) {
   if (message.channel === 'trades' && Array.isArray(message.data)) {
     return message.data.map(trade => {
+      const [buyer, seller] = trade.users || [];
+      const wallets = [buyer, seller];   // keep both ends
+
       const size = parseFloat(trade.sz);
-      
-      
-      const asset = trade.coin;
       const price = parseFloat(trade.px);
       const notionalValue = size * price;
       
       return {
-        asset,
+        asset: trade.coin,
         side: trade.side === 'B' ? 'BUY' : 'SELL',
         price,
         size,
         notionalValue,
         timestamp: new Date(parseInt(trade.time)).toISOString(),
         isWhale: notionalValue >= MIN_POSITION_VALUE,
-        hash: trade.hash, 
-        tradeId: trade.tid 
+        hash: trade.hash,
+        tradeId: trade.tid,
+        wallets          // renamed field
       };
     });
   }
@@ -283,8 +284,10 @@ async function fetchActivePositions() {
                 direction: size > 0 ? 'LONG' : 'SHORT',
                 notionalValue,
                 entryPrice: price,
-                liquidationPrice: parseFloat(position.position.liquidationPx || 0),
-                leverage: position.position.leverage ? (position.position.leverage.value || 0) : 0,
+                liquidationPrice: parseFloat(position.position.liquidationPx ?? position.position.liqPx ?? 0),
+                leverage: typeof position.position.leverage === 'number'
+                  ? position.position.leverage
+                  : (position.position.leverage?.value ?? 1),
                 pnl: parseFloat(position.position.unrealizedPnl || 0),
                 timestamp: new Date().toISOString()
               });
@@ -433,6 +436,8 @@ function closeWebSocket() {
 }
 
 async function getPositionDetails(wallet, asset) {
+  if (!wallet) return null; // skip if we didn't get an address
+  
   try {
     const res = await fetch(`${HYPERLIQUID_API_URL}/info`, {
       method: 'POST',
@@ -450,8 +455,10 @@ async function getPositionDetails(wallet, asset) {
       asset,
       size: parseFloat(pos.szi),
       entryPrice: parseFloat(pos.entryPx),
-      leverage: pos.leverage?.value || 1,
-      liquidationPrice: parseFloat(pos.liquidationPx || 0),
+      leverage: typeof pos.leverage === 'number' 
+        ? pos.leverage 
+        : (pos.leverage?.value ?? 1),
+      liquidationPrice: parseFloat(pos.liquidationPx ?? pos.liqPx ?? 0),
       timestamp: new Date().toISOString()
     };
   } catch (e) {

@@ -153,15 +153,15 @@ async function handleWebSocketMessage(message) {
       
       console.log(`Found ${newTrades.length} new trades`);
       
-      // Process new trades
+     
       if (newTrades.length > 0) {
         const whaleTrades = processWhaleTrades(newTrades);
         console.log(`Found ${whaleTrades.length} whale trades`);
         
-        // Add whale trades to recent trades list
+     
         if (whaleTrades.length > 0) {
           recentWhaleTrades.push(...whaleTrades);
-          // Keep only the most recent 100 whale trades
+        
           if (recentWhaleTrades.length > 100) {
             recentWhaleTrades.splice(0, recentWhaleTrades.length - 100);
           }
@@ -176,7 +176,7 @@ async function handleWebSocketMessage(message) {
           });
         }
         
-        // Update current price if available
+      
         if (newTrades.length > 0) {
           const asset = newTrades[0].asset;
           if (marketStats[asset]) {
@@ -362,9 +362,8 @@ async function updateMarketStats() {
         marketStats[asset].price = prices[asset];
       }
       
-      // Update open interest if available from metadata
+
       if (metaData && metaData.assetContexts) {
-        // Find the asset context for this asset
         const assetIndex = assetIndices[asset] || -1;
         if (assetIndex >= 0 && assetIndex < metaData.assetContexts.length) {
           const assetCtx = metaData.assetContexts[assetIndex];
@@ -377,7 +376,7 @@ async function updateMarketStats() {
       marketStats[asset].lastUpdated = Date.now();
     }
     
-    // Log market stats
+
     console.log('Market stats updated:');
     for (const asset of MONITORED_ASSETS) {
       console.log(`- ${asset}: $${marketStats[asset].price.toLocaleString()}, OI: ${marketStats[asset].openInterest.toLocaleString()} ${asset}`);
@@ -387,14 +386,14 @@ async function updateMarketStats() {
   }
 }
 
-// Calculate position as percentage of open interest
+
 function calculatePercentOfOI(position) {
   const asset = position.asset;
   if (!marketStats[asset] || marketStats[asset].openInterest === 0) return 0;
   return (Math.abs(position.size) / marketStats[asset].openInterest) * 100;
 }
 
-// Calculate risk level (1-5)
+
 function calculateRiskLevel(position) {
   // Higher leverage = higher risk
   const leverageRisk = Math.min(position.leverage / 10, 1) * 2.5; 
@@ -405,7 +404,7 @@ function calculateRiskLevel(position) {
   return Math.min(Math.round(leverageRisk + sizeRisk), 5);
 }
 
-// Estimate market impact
+
 function estimateMarketImpact(position) {
   // Simplified calculation - higher % of OI = higher impact
   return Math.min(position.percentOfOI * 2, 100);

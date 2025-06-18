@@ -50,7 +50,6 @@ MONITORED_ASSETS.forEach(asset => {
 const processedTradeIds = new Set();
 const MAX_CACHED_TRADE_IDS = 10000;
 
-
 class RateLimiter {
   constructor(maxRequests, timeWindow) {
     this.maxRequests = maxRequests;
@@ -69,10 +68,8 @@ class RateLimiter {
         this.requests.push(now);
         resolve();
       } else {
-
         this.queue.push(resolve);
         
-
         if (!this.processing) {
           this.processQueue();
         }
@@ -101,7 +98,6 @@ class RateLimiter {
     this.processing = false;
   }
 }
-
 
 const tweetRateLimiter = new RateLimiter(5, 60 * 1000);
 
@@ -155,25 +151,21 @@ async function handleWebSocketMessage(message) {
       
      
       if (newTrades.length > 0) {
-        const whaleTrades = processWhaleTrades(newTrades);
+        const whaleTrades = await processWhaleTrades(newTrades);
         console.log(`Found ${whaleTrades.length} whale trades`);
         
      
         if (whaleTrades.length > 0) {
-          recentWhaleTrades.push(...whaleTrades);
+          whaleTrades.forEach(trade => recentWhaleTrades.push(trade));
         
-          if (recentWhaleTrades.length > 100) {
-            recentWhaleTrades.splice(0, recentWhaleTrades.length - 100);
-          }
+          await storeTradeData(whaleTrades);
           
-          storeTradeData(whaleTrades);
-          
-          whaleTrades.forEach(async trade => {
+          await Promise.all(whaleTrades.map(async trade => {
             console.log(`Checking trade for Twitter: $${trade.notionalValue} (threshold: $50,000)`);
-            if (trade.notionalValue >= 50_000) { // Only log trades above $50K
+            if (trade.notionalValue >= 50_000) {
               await postTradeToTwitter(trade);
             }
-          });
+          }));
         }
         
       

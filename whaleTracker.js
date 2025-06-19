@@ -14,6 +14,7 @@ import {
 import { TwitterApi } from 'twitter-api-v2';
 import dotenv from 'dotenv';
 import fs from 'fs/promises';
+import http from 'http';
 import {
   formatMobyStylePositionTweet,
   formatMobyStyleTradeTweet,
@@ -264,6 +265,15 @@ async function scanWhalePositions() {
       position.marketImpact = estimateMarketImpact(position);
       position.liquidationRisk = calculateLiquidationRisk(position);
       
+      // Validate liquidation price
+      if (position.liquidationPrice && position.entryPrice) {
+        if (position.direction === 'LONG' && position.liquidationPrice >= position.entryPrice) {
+          console.warn(`🚨 Invalid liquidation price for LONG position: ${position.wallet} ${position.asset} - Entry: $${position.entryPrice}, Liq: $${position.liquidationPrice}`);
+        } else if (position.direction === 'SHORT' && position.liquidationPrice <= position.entryPrice) {
+          console.warn(`🚨 Invalid liquidation price for SHORT position: ${position.wallet} ${position.asset} - Entry: $${position.entryPrice}, Liq: $${position.liquidationPrice}`);
+        }
+      }
+      
       trackedPositions.set(positionKey, position);
       
       console.log(JSON.stringify(position, null, 2));
@@ -287,6 +297,15 @@ async function scanWhalePositions() {
         position.riskLevel = calculateRiskLevel(position);
         position.marketImpact = estimateMarketImpact(position);
         position.liquidationRisk = calculateLiquidationRisk(position);
+        
+        // Validate liquidation price
+        if (position.liquidationPrice && position.entryPrice) {
+          if (position.direction === 'LONG' && position.liquidationPrice >= position.entryPrice) {
+            console.warn(`🚨 Invalid liquidation price for LONG position: ${position.wallet} ${position.asset} - Entry: $${position.entryPrice}, Liq: $${position.liquidationPrice}`);
+          } else if (position.direction === 'SHORT' && position.liquidationPrice <= position.entryPrice) {
+            console.warn(`🚨 Invalid liquidation price for SHORT position: ${position.wallet} ${position.asset} - Entry: $${position.entryPrice}, Liq: $${position.liquidationPrice}`);
+          }
+        }
         
         trackedPositions.set(positionKey, position);
         
@@ -410,13 +429,23 @@ function calculateLiquidationRisk(position) {
   
   const currentPrice = marketStats[asset].price;
   const liquidationPrice = position.liquidationPrice;
+  const entryPrice = position.entryPrice;
   
+  // Validate liquidation price makes sense for position direction
   if (position.direction === 'LONG') {
-    // For longs, liq price is below entry
+    // For longs, liq price should be below entry price
+    if (liquidationPrice >= entryPrice) {
+      console.warn(`Invalid liquidation price for LONG position: Entry $${entryPrice}, Liq $${liquidationPrice}`);
+      return 0;
+    }
     const priceDrop = ((currentPrice - liquidationPrice) / currentPrice) * 100;
     return Math.max(0, 100 - priceDrop);
   } else {
-    // For shorts, liq price is above entry
+    // For shorts, liq price should be above entry price
+    if (liquidationPrice <= entryPrice) {
+      console.warn(`Invalid liquidation price for SHORT position: Entry $${entryPrice}, Liq $${liquidationPrice}`);
+      return 0;
+    }
     const priceRise = ((liquidationPrice - currentPrice) / currentPrice) * 100;
     return Math.max(0, 100 - priceRise);
   }
@@ -703,9 +732,25 @@ function handleShutdown() {
 process.on('SIGINT', handleShutdown);
 process.on('SIGTERM', handleShutdown);
 
+// Add global error handlers for Railway
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  // Don't exit, just log the error
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  // Don't exit, just log the error
+});
+
 // Main function
 async function main() {
   console.log(`Hyperliquid Whale Bot starting...`);
+  console.log(`Environment check:`, {
+    hasTwitterKeys: !!(process.env.TWITTER_APP_KEY && process.env.TWITTER_APP_SECRET),
+    hasDiscordWebhook: !!process.env.DISCORD_WEBHOOK,
+    nodeEnv: process.env.NODE_ENV || 'development'
+  });
   console.log(`Monitoring assets: ${MONITORED_ASSETS.join(', ')}`);
   
   // Test Twitter connection
@@ -723,21 +768,40 @@ async function main() {
   }
   
   // Initialize asset indices (needed for API calls)
+  console.log('Starting asset initialization...');
   await initializeAssetIndices();
+  console.log('Asset initialization complete');
   
   // Scan for current whale positions immediately
+  console.log('Starting initial whale position scan...');
   await scanWhalePositions();
+  console.log('Initial whale position scan complete');
   
   // Connect to WebSocket for real-time updates
+  console.log('Connecting to WebSocket...');
   const ws = connectWebSocket(handleWebSocketMessage);
+  console.log('WebSocket connection initiated');
   
   // Scan for new positions every 5 minutes
+  console.log('Setting up periodic position scanning...');
   setInterval(scanWhalePositions, 5 * 60 * 1000);
   
   console.log('Bot is now running! Press Ctrl+C to stop.');
+  console.log('Waiting for whale trades...');
 }
 
 // Run the main function
 main().catch(error => {
   console.error('Error in main function:', error);
+}); 
+
+// Simple HTTP server for Railway health checks
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Hyperliquid Whale Bot is running! 🐋');
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`Health check server running on port ${PORT}`);
 }); 

@@ -21,6 +21,7 @@ import {
   formatMobyStylePositionClosureTweet,
   getWalletStats
 } from './tweetFormats.js';
+import { notifyDiscord } from './utils/notify.js';
 
 dotenv.config();
 
@@ -161,8 +162,8 @@ async function handleWebSocketMessage(message) {
           await storeTradeData(whaleTrades);
           
           await Promise.all(whaleTrades.map(async trade => {
-            console.log(`Checking trade for Twitter: $${trade.notionalValue} (threshold: $50,000)`);
-            if (trade.notionalValue >= 50_000) {
+            console.log(`Checking trade for Twitter: $${trade.notionalValue} (threshold: $100,000)`);
+            if (trade.notionalValue >= 100_000) {
               await postTradeToTwitter(trade);
             }
           }));
@@ -563,6 +564,9 @@ async function postPositionToTwitter(position) {
     const tweetText = formatMobyStylePositionTweet(position, stats) + txLink;
     console.log('Posting to Twitter:', tweetText);
     await twitterClient.v2.tweet(tweetText);
+    
+    // fire-and-forget Discord
+    notifyDiscord(tweetText).catch(console.error);
   } catch (error) {
     console.error('Error posting position tweet:', error);
   }
@@ -577,6 +581,9 @@ async function postPositionUpdateToTwitter(position) {
     const tweetText = formatMobyStylePositionUpdateTweet(position, stats) + txLink;
     console.log('Posting to Twitter:', tweetText);
     await twitterClient.v2.tweet(tweetText);
+    
+    // fire-and-forget Discord
+    notifyDiscord(tweetText).catch(console.error);
   } catch (error) {
     console.error('Error posting position update tweet:', error);
   }
@@ -591,6 +598,9 @@ async function postPositionClosureToTwitter(position) {
     const tweetText = formatMobyStylePositionClosureTweet(position, stats) + txLink;
     console.log('Posting to Twitter:', tweetText);
     await twitterClient.v2.tweet(tweetText);
+    
+    // fire-and-forget Discord
+    notifyDiscord(tweetText).catch(console.error);
   } catch (error) {
     console.error('Error posting position closure tweet:', error);
   }
@@ -668,6 +678,9 @@ async function postTradeToTwitter(trade) {
     // Write back to file
     await fs.writeFile('logs/whale_trades_log.json', JSON.stringify(logs, null, 2));
     console.log('Whale trade logged to file.');
+    
+    // fire-and-forget Discord
+    notifyDiscord(tweetText).catch(console.error);
   } catch (error) {
     console.error('Error logging whale trade:', error);
   }

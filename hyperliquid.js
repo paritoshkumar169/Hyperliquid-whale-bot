@@ -8,7 +8,7 @@ const HYPERLIQUID_API_URL = 'https://api.hyperliquid.xyz';
 const HYPERLIQUID_WS_URL = 'wss://api.hyperliquid.xyz/ws';
 
 
-const MIN_POSITION_VALUE = 10_000; 
+const MIN_POSITION_VALUE = 100_000; 
 
 
 const MONITORED_ASSETS = ['BTC', 'ETH', 'SOL'];
